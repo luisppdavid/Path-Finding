@@ -1,0 +1,496 @@
+<html>
+
+<head>
+	<title>Path-Finding</title>
+	<meta http-equiv='content-type' content='text/html; charset=ISO-8859-1'>
+
+
+	<script src="glUtil.js"></script>
+	<script src="shaders.js"></script>
+	<script src="Loop.js"></script>
+	<script src="meshModal.js"></script>
+	<script src="grid2.js"></script>
+
+	<script id="vertex_shader" type="x-shader/x-vertex">#version 300 es
+		in vec3 a_position;	
+		layout(location=4) in float a_color;
+
+		uniform vec3 uColor[4];	//array de cor
+
+		out lowp vec4 color;	//enviar para fs
+		
+		void main(void){
+			color = vec4(uColor[ int(a_color) ],1.0); //Using the 4th float as a color index.
+			gl_Position = vec4(a_position, 1.0);
+		}
+	</script>
+
+	<script id="fragment_shader" type="x-shader/x-fragment">#version 300 es
+		precision mediump float;
+
+		in vec4 color;
+		out vec4 finalColor;
+		
+		void main(void){ 
+			finalColor = color; 
+		}
+	</script>
+
+	<input type="file"/>
+	<input type="button" onclick="dumbPathFinding();" value="Run!" />
+
+	<script id='code-js' type="text/javascript">
+		var gl;
+		var gRLoop;	
+		var gShader; 
+		var gModal;
+		var gCanvas;
+		var gVertsMapDefault;
+		var gVertsMapUsable;
+		var gVertsMapTest = [];
+		var gVertsMapNum = [];
+		var gVertsGO = [];
+		var gVertsGeraisX = [];
+		var gVertsGeraisY = [];
+		var gVertsGOUsable = [];
+		var gNodes;
+		var gPathVerts = [];
+		var gPathVertsUsable;
+		var gNodeStart = "";
+		var gNodeGoal = "";
+		var gModalBarreiras;
+		var gModalGoalANDObjective;
+		var gModalPath;
+		var gAuxTest = false;
+		var gAuxGO = false;
+		var gHaGO = false;
+		var gAuxPath = false;
+		var gHaPath = false;
+		var gCounterGO = 0;
+		var gCounter = 0;
+		var gCounterPath = 0;
+		var gWidthGrid = 0.0;
+		var gHeightGrid = 0.0;
+		var gCellSize = 0.0;
+		var gHalfCellSize = 0.0;
+		const inputFile = document.querySelector('input[type="file"]');
+
+			inputFile.addEventListener('change', function(e){
+				console.log(inputFile.files);
+				const ler = new FileReader();
+				ler.onload = function(){
+					const linhas = ler.result.split("\n").map( function(linha){
+					return linha.split('');
+				});
+				getMapDims(linhas);
+				getMapVerts(linhas);
+				
+				setCellSize();
+
+				console.log(linhas);
+				
+				}
+				ler.readAsText(inputFile.files[0]);
+				gAuxTest = true;
+			},false);
+
+			window.addEventListener("load",function(){
+				
+				gl = GLInstance("glcanvas").fSetSize(500,500).fClear();
+				var gCanvas = document.getElementById("glcanvas");
+				gShader = new TestShader(gl,[ 0.2,0.2,0.2,  0,0,1,  1,1,0,  0.0,1.0,0.2, 1,1,0]); 
+
+
+				gVertsMapDefault = new Float32Array([ 0.90,0.86,0.0,3.0, 
+									   		   0.90,0.90,0.0,3.0, 
+									   		  -0.90,0.90,0.0,3.0,
+									   		  -0.90,0.90,0.0,3.0,
+									   		   0.90,0.86,0.0,3.0, 
+									   		  -0.90,0.86,0.0,3.0,// 
+									   		   0.90,-0.86,0.0,3.0, 
+									   		   0.90,-0.90,0.0,3.0, 
+									   		  -0.90,-0.90,0.0,3.0,
+									   		  -0.90,-0.90,0.0,3.0,
+									   		   0.90,-0.86,0.0,3.0, 
+									   		  -0.90,-0.86,0.0,3.0,// 
+									   		   0.90,-0.86,0.0,3.0, 
+									   		   0.90,-0.90,0.0,3.0, 
+									   		  -0.90,-0.90,0.0,3.0,
+									   		  -0.90,-0.90,0.0,3.0,
+									   		   0.90,-0.86,0.0,3.0, 
+									   		  -0.90,-0.86,0.0,3.0,//
+									   		  -0.90,0.90,0.0,3.0, 
+									   		  -0.86,-0.90,0.0,3.0, 
+									   		  -0.90,-0.90,0.0,3.0,
+									   		  -0.90,0.90,0.0,3.0,
+									   		  -0.86,0.90,0.0,3.0, 
+									   		  -0.86,-0.90,0.0,3.0,//
+									   		   0.90,0.90,0.0,3.0, 
+									   		   0.86,-0.90,0.0,3.0, 
+									   		   0.90,-0.90,0.0,3.0,
+									   		   0.90,0.90,0.0,3.0,
+									   		   0.86,0.90,0.0,3.0, 
+									   		   0.86,-0.90,0.0,3.0,//
+									   		   0.76,0.76,0.0,3.0, 
+									   		   0.65,-0.76,0.0,3.0, 
+									   		   0.76,-0.76,0.0,3.0,
+									   		   0.76,0.76,0.0,3.0,
+									   		   0.65,0.76,0.0,3.0, 
+									   		   0.65,-0.76,0.0,3.0,//
+									   		   0.45,0.14,0.0,3.0, 
+									   		   0.45,0.45,0.0,3.0, 
+									   		  -0.45,0.45,0.0,3.0,
+									   		  -0.45,0.45,0.0,3.0,
+									   		   0.45,0.14,0.0,3.0, 
+									   		  -0.45,0.14,0.0,3.0,//
+									   		  -0.60,-0.60,0.0,3.0,
+									   		  -0.60,0.60,0.0,3.0,
+									   		  -0.30,0.45,0.0,3.0 ]);
+
+
+				gModal = new meshModal(Primitivas.Grid.createMesh(gl,gWidthGrid,gHeightGrid,gCellSize));
+				gModalBarreiras = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsMapDefault));
+
+				gCanvas.addEventListener('mousedown', function(e) { 
+					aoClick(e,gVertsGO,gCanvas);
+				});
+
+				RLoop = new RenderLoop(onRender).start();
+			});
+
+			function onRender(dt){
+				
+				gl.fClear();
+				gShader.activate().renderModal(gModal);
+				gShader.activate().renderModal(gModalBarreiras);
+				if(gHaGO){
+					gShader.activate().renderModal(gModalGoalANDObjective);
+				}
+				if(gHaPath){
+					gShader.activate().renderModal(gModalPath);
+				}
+
+				if(gAuxTest===true){
+					//console.log(gVertsMapTest); debug purposes
+					turnTsToVerts(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+					gModal = new meshModal(Primitivas.Grid.createMesh(gl,gWidthGrid,gHeightGrid,gCellSize));
+					gVertsMapUsable = new Float32Array(gVertsMapNum);
+					//console.log(gVertsMapUsable);
+					gModalBarreiras = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsMapUsable));
+					gAuxTest = false;
+				}
+
+				if(gAuxGO===true){
+
+					//console.log(gVertsGO);
+					
+					var gVertsDebug = new Float32Array([ -0.02,-0.02,0.0,1.0, 
+									   					 0.02, -0.02,0.0,1.0, 
+									  					 -0.02, 0.02,0.0,1.0,
+									   					 0.02,0.02, 0.0, 1.0,
+									   					 0.02, -0.02,0.0,1.0, 
+									                     -0.02, 0.02,0.0,1.0 ]);
+					//console.log(gVertsGOUsable);
+					//console.log(gVertsDebug);
+					gModalGoalANDObjective = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsGOUsable));
+					gAuxGO = false;
+					gHaGO = true;
+				}
+
+				if(gAuxPath===true){
+					console.log("coco");
+					gPathVertsUsable = new Float32Array(gPathVerts);
+					gModalPath = new meshModal(Primitivas.Barreiras.createMesh(gl,gPathVertsUsable));
+					gAuxPath = false;
+					gHaPath = true;
+				}
+
+
+			}
+
+			function setCellSize(){
+				if(gWidthGrid>=gHeightGrid){
+					gCellSize = 1.8/gWidthGrid;
+				}else{
+					gCellSize = 1.8/gHeightGrid;
+				}
+				gHalfCellSize = gCellSize/2;
+				//console.log(gCellSize);
+				//console.log(gHalfCellSize);
+			}
+
+			function getMapDims(ary){
+
+				var tamLinhaH = ary[1].length;
+				var tamLinhaW = ary[2].length;
+
+				//console.log(tamLinhaW);
+				//console.log(tamLinhaH);
+				//console.log(ary[1][tamLinhaH-2]);
+				var auxTemp;
+				//console.log(auxTemp);
+				for(let i=(tamLinhaH-8);i>-1;i--){
+					auxTemp = parseFloat(ary[1][tamLinhaH-i-1]);
+					gHeightGrid += Math.pow(10,i)*auxTemp;
+				}
+
+				//console.log(gHeightGrid);
+
+				for(let ii=(tamLinhaW-7);ii>-1;ii--){
+					auxTemp = parseFloat(ary[2][tamLinhaW-ii-1]);
+					gWidthGrid += Math.pow(10,ii)*auxTemp;
+				}
+
+				//console.log(gWidthGrid);
+				//var teste = gWidthGrid + gHeightGrid;
+				//console.log(teste);
+
+			}
+
+			function getMapVerts(ary){
+				
+				ary.forEach(function(linha,indexY){
+					if(indexY>3){
+					 	gVertsMapTest.push(linha);
+					}
+				});
+			}
+
+			function turnTsToVerts(cS,cSH,cSHy){
+				gNodes = makeArray(gHeightGrid,gWidthGrid);
+				gVertsMapTest.forEach(function(linha, indexY){
+					linha.forEach(function(cell, indexX){
+						if(cell=="T"){
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+							//gNodes[indexX][indexY] = "full";
+						}else if(cell=="@"){
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+							//gNodes[indexX][indexY] = "empty";
+						}else if(cell=="."){
+							gNodes[indexX][indexY] = "free";
+						}
+					});
+				});
+
+				//console.log(gVertsMapNum); //debug purposes
+				//console.log(gVertsGeraisX);
+				//console.log(gVertsGeraisY);
+				//console.log(gNodes);
+			}
+
+			class TestShader extends Shader{
+				
+				constructor(gl,aryColor){
+					var vertSrc = ShaderUtil.domShaderSrc("vertex_shader"),
+						fragSrc = ShaderUtil.domShaderSrc("fragment_shader");
+					super(gl,vertSrc,fragSrc);
+
+					//Our shader uses custom uniforms 
+					var uColor	= gl.getUniformLocation(this.program,"uColor");
+					gl.uniform3fv(uColor, aryColor);
+
+					gl.useProgram(null); //Done setting up shader
+				}
+			}
+
+			function aoClick(event, points, canvas){
+
+				var xClick = event.clientX;
+				var yClick = event.clientY;
+
+				var meioX = canvas.width/2;
+				var meioY = canvas.height/2;
+
+				var rect = event.target.getBoundingClientRect();
+
+				xClick = ((xClick - rect.left) - meioX)/meioX;
+				yClick = (meioY - (yClick - rect.top))/meioY;
+
+				//console.log(xClick);
+				//console.log(yClick);
+
+				var x1;
+				var x2;
+				var auxX = -0.9;
+				var auxI;
+
+				for(let i=1 ; i <= gWidthGrid ; i++){
+					if(auxX > xClick ){
+						x1 = auxX - gCellSize;
+						x2 = auxX;
+						auxI = i-2;
+						break;
+					}
+					auxX = auxX + gCellSize;
+				}
+				
+
+				var y1;
+				var y2;
+				var auxY = 0.9;
+				var auxJ;
+
+				for(let j=1 ; j <= gWidthGrid ; j++){
+					if(auxY < yClick ){
+						y1 = auxY + gCellSize;
+						y2 = auxY;
+						auxJ=j-2;
+						break;
+					}
+					auxY = auxY - gCellSize;
+				}
+
+
+				
+				if(gCounterGO==0){
+
+					gNodeStart = [auxI,auxJ];
+					
+					gVertsGOUsable = new Float32Array([ x1,y1,0.0,1.0,
+														x1,y2,0.0,1.0,
+														x2,y1,0.0,1.0,
+														x1,y2,0.0,1.0,
+														x2,y1,0.0,1.0,
+														x2,y2,0.0,1.0]);
+
+					gCounterGO++;
+				
+				} else if(gCounterGO<2){
+					
+					gNodeGoal = [auxI,auxJ];
+
+					var aux = gVertsGOUsable;
+					var aux2 = new Float32Array([ x1,y1,0.0,1.0,
+												  x1,y2,0.0,1.0,
+												  x2,y1,0.0,1.0,
+												  x1,y2,0.0,1.0,
+												  x2,y1,0.0,1.0,
+												  x2,y2,0.0,1.0]);
+
+					gVertsGOUsable = new Float32Array(aux.length + aux2.length);
+					gVertsGOUsable.set(aux);
+					gVertsGOUsable.set(aux2,aux.length);
+					gCounterGO++;
+
+				}
+
+				//console.log(gVertsGO);
+
+				if(gAuxGO===false){
+					gAuxGO=true;
+				}
+
+				
+			}
+
+			function dumbPathFinding(){
+				var i = gNodeStart[0];
+				var j = gNodeStart[1];
+				gNodes[i][j] = "start";
+				var paragem = "running";
+				var iGoal = gNodeGoal[0];
+				var jGoal = gNodeGoal[1];
+				gNodes[iGoal][jGoal] = "goloooo";
+
+				do{
+					if(gNodes[i][j]=="goloooo" || gNodes[i+1][j]=="goloooo" || gNodes[i-1][j]=="goloooo" || gNodes[i][j+1]=="goloooo" || gNodes[i][j-1]=="goloooo"){
+						paragem = "feito";
+						console.log("Objetivo encontrado!");
+					}
+
+					if(gNodes[i][j]=="free"){
+						gNodes[i][j] = "visitado";
+					}
+
+					if(gNodes[i+1][j]=="free" && (i+1)<=(gHeightGrid-2)){
+						i++;
+					}else if(gNodes[i][j+1]=="free" && (j+1)<=(gWidthGrid-2)){
+						j++;
+					}else if(gNodes[i-1][j]=="free" && (i-1)>=1){
+						i--;
+					}else if(gNodes[i][j-1]=="free" && (j-1)>=1){
+						j--;
+					} else{
+						paragem = "erro";
+					}
+
+					console.log(i + "|" + j);
+				}while(paragem=="running");
+		
+				console.log(paragem);
+				console.log(gNodes);
+
+				gNodes[iGoal][jGoal] = "goloooo";
+
+				pintaPath(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+			}
+
+			function makeArray(w, h) {
+    			var arr = [];
+    			for(let i = 0; i < h; i++) {
+        			arr[i] = [];
+       				for(let j = 0; j < w; j++) {
+            			arr[i][j] = "block";
+        			}
+    			}
+    			return arr;
+			}			
+
+			function pintaPath(cS,cSH,cSHy){
+				gNodes.forEach(function(linha, indexY){
+					linha.forEach(function(cell, indexX){
+						if(cell=="visitado"){
+
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							
+						}
+					});
+				});
+				gAuxPath = true;
+			}
+	
+	</script>
+</head>
+
+<body style="background-color: #001000;">
+	<div id='top'>
+		<h1 align="center" style="font-family: monospace; font-weight: bolder; font-size: 400%; color: #ffffff;"> 		
+			Path-Finding in Digital Games
+		</h1>
+		<h2 align="center" style="font-family: monospace; color: #cc9900;">
+			Various path-finding algorithms!
+		</h2>
+
+
+		<p></p>
+	</div>
+
+	<div id='contents'>
+		<div id='canvasContainer' style="text-align: center;">
+			<canvas id='glcanvas' style="border:1px solid #000000;" width='1300' height='500'>
+				Your browser does not support the HTML5 canvas element.
+			</canvas>
+		</div>
+	</div>
+
+	<div id='bottom'>
+		<table style='padding=0px'>
+		</table>
+	</div>
+</body>
+</html>
