@@ -1,0 +1,673 @@
+<head>
+	<title>Path-Finding</title>
+	<meta http-equiv='content-type' content='text/html; charset=ISO-8859-1'>
+
+	<div style="max-width:1500px">
+		<center>
+        	<h1 align="center" style="font-family:verdana;background-color:#40C575">Path-Finding Lemonade</h1>
+        	<h3 align="center" style="font-family:verdana;background-color:#40C575">A webpage for showcasing various path-finding algorithms</h3>
+        	<table style="border:1px solid #40C575;">
+        		<tr>
+        			<td><input type="file"/></td>
+        			<td><input type="button" onclick="escolherAlgoritmo();" value="Run Algorithm" /></td>
+        			<td><button onClick="window.location.reload();">Reset</button></td>
+        		</tr>
+        	</table>
+        	<table style="border:1px solid #40C575;">
+        		<tr>
+        			<td><input type="radio" id="e1" name="e" value="Escolha">A*</td>
+  					<td><input type="radio" id="e2" name="e" value="Escolha">BFS</td>
+  					<td><input type="radio" id="e3" name="e" value="Escolha">Dijkstra</td>
+        		</tr>
+        	</table>
+    	</center>
+   	</div>
+
+	<script src="glUtil.js"></script>
+	<script src="shaders.js"></script>
+	<script src="Loop.js"></script>
+	<script src="meshModal.js"></script>
+	<script src="grid2.js"></script>
+
+	<script id="vertex_shader" type="x-shader/x-vertex">#version 300 es
+		in vec3 a_position;	
+		layout(location=4) in float a_color;
+
+		uniform vec3 uColor[10];	//array de cor
+
+		out lowp vec4 color;	//enviar para fs
+		
+		void main(void){
+			color = vec4(uColor[ int(a_color) ],1.0); //Using the 4th float as a color index.
+			gl_Position = vec4(a_position, 1.0);
+		}
+	</script>
+
+	<script id="fragment_shader" type="x-shader/x-fragment">#version 300 es
+		precision mediump float;
+
+		in vec4 color;
+		out vec4 finalColor;
+		
+		void main(void){ 
+			finalColor = color; 
+		}
+	</script>
+
+	<script id='code-js' type="text/javascript">
+		var gl;
+		var gRLoop;	
+		var gShader; 
+		var gModal;
+		var gCanvas;
+		var gVertsMapDefault;
+		var gVertsMapUsable;
+		var gVertsMapTest = [];
+		var gVertsMapNum = [];
+		var gVertsGO = [];
+		var gVertsGeraisX = [];
+		var gVertsGeraisY = [];
+		var gVertsGOUsable = [];
+		var gNodes;
+		var gPathVerts = [];
+		var gPathVertsUsable;
+		var gNodeStart = "";
+		var gNodeGoal = "";
+		var gModalBarreiras;
+		var gModalGoalANDObjective;
+		var gModalPath;
+		var gAuxTest = false;
+		var gAuxGO = false;
+		var gHaGO = false;
+		var gAuxPath = false;
+		var gHaPath = false;
+		var gCounterGO = 0;
+		var gCounter = 0;
+		var gCounterPath = 0;
+		var gWidthGrid = 0.0;
+		var gHeightGrid = 0.0;
+		var gCellSize = 0.0;
+		var gHalfCellSize = 0.0;
+		const inputFile = document.querySelector('input[type="file"]');
+
+			inputFile.addEventListener('change', function(e){
+				
+				const ler = new FileReader();
+				ler.onload = function(){
+					const linhas = ler.result.split("\n").map( function(linha){
+					return linha.split('');
+				});
+				getMapDims(linhas);
+				getMapVerts(linhas);
+				
+				setCellSize();
+
+				//console.log(linhas);
+				
+				}
+				ler.readAsText(inputFile.files[0]);
+				gAuxTest = true;
+			},false);
+
+			window.addEventListener("load",function(){
+				
+				gl = GLInstance("glcanvas").fSetSize(500,500).fClear();
+				var gCanvas = document.getElementById("glcanvas");
+				gShader = new TestShader(gl,[0.2,0.2,0.2,  0.0,0.0,1.0,  0.498,1.0,0.831,  0.251,0.773,0.459, 1.0,0.0,0.0, 1.0,1.0,0.0, 0.90,1.0,1.0]); 
+
+
+				gVertsMapDefault = new Float32Array([ 0.005,0.005,0.0,5.0,
+													  0.4,0.005,0.0,5.0,
+													  0.005,0.4,0.0,5.0,
+													 -0.005,0.005,0.0,5.0,
+													 -0.4,0.005,0.0,5.0, 
+													 -0.005,0.4,0.0,5.0,
+													  0.005,-0.005,0.0,5.0,
+													  0.4,-0.005,0.0,5.0, 
+													  0.005,-0.4,0.0,5.0,
+													 -0.005,-0.005,0.0,5.0,
+													 -0.4,-0.005,0.0,5.0, 
+													 -0.005,-0.4,0.0,5.0,
+													  0.005,0.405,0.0,3.0,
+													  0.1, 0.405, 0.0,3.0,
+													  0.2, 0.5, 0.0, 3.0,
+													  0.005, 0.41, 0.0, 3.0,
+													  0.1, 0.505,0.0, 3.0,
+													  0.2, 0.505,0.0, 3.0 ]);
+
+
+				gModal = new meshModal(Primitivas.Grid.createMesh(gl,gWidthGrid,gHeightGrid,gCellSize));
+				gModalBarreiras = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsMapDefault));
+
+				gCanvas.addEventListener('mousedown', function(e) { 
+					aoClick(e,gVertsGO,gCanvas);
+				});
+
+				RLoop = new RenderLoop(onRender).start();
+			});
+
+			function onRender(dt){
+				
+				gl.fClear();
+				gShader.activate().renderModal(gModal);
+				gShader.activate().renderModal(gModalBarreiras);
+				if(gHaGO){
+					gShader.activate().renderModal(gModalGoalANDObjective);
+				}
+				if(gHaPath){
+					gShader.activate().renderModal(gModalPath);
+				}
+
+				if(gAuxTest===true){
+					turnTsToVerts(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+					gModal = new meshModal(Primitivas.Grid.createMesh(gl,gWidthGrid,gHeightGrid,gCellSize));
+					gVertsMapUsable = new Float32Array(gVertsMapNum);
+					gModalBarreiras = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsMapUsable));
+					gAuxTest = false;
+				}
+
+				if(gAuxGO===true){
+
+					gModalGoalANDObjective = new meshModal(Primitivas.Barreiras.createMesh(gl,gVertsGOUsable));
+					gAuxGO = false;
+					gHaGO = true;
+				}
+
+				if(gAuxPath===true){
+					
+					gPathVertsUsable = new Float32Array(gPathVerts);
+					gModalPath = new meshModal(Primitivas.Barreiras.createMesh(gl,gPathVertsUsable));
+					gAuxPath = false;
+					gHaPath = true;
+				}
+			}
+
+			function setCellSize(){
+				if(gWidthGrid>=gHeightGrid){
+					gCellSize = 1.8/gWidthGrid;
+				}else{
+					gCellSize = 1.8/gHeightGrid;
+				}
+				gHalfCellSize = gCellSize/2;
+			}
+
+			function getMapDims(ary){
+
+				var tamLinhaH = ary[1].length;
+				var tamLinhaW = ary[2].length;
+
+				
+				var auxTemp;
+				for(let i=(tamLinhaH-8);i>-1;i--){
+					auxTemp = parseFloat(ary[1][tamLinhaH-i-1]);
+					gHeightGrid += Math.pow(10,i)*auxTemp;
+				}
+
+				for(let ii=(tamLinhaW-7);ii>-1;ii--){
+					auxTemp = parseFloat(ary[2][tamLinhaW-ii-1]);
+					gWidthGrid += Math.pow(10,ii)*auxTemp;
+				}
+
+			}
+
+			function getMapVerts(ary){
+				
+				ary.forEach(function(linha,indexY){
+					if(indexY>3){
+					 	gVertsMapTest.push(linha);
+					}
+				});
+			}
+
+			function turnTsToVerts(cS,cSH,cSHy){
+				gNodes = makeArray(gHeightGrid,gWidthGrid);
+				gVertsMapTest.forEach(function(linha, indexY){
+					linha.forEach(function(cell, indexX){
+						if(cell=="T"){
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,3.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,3.0);
+						}else if(cell=="@"){
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH - cS + ((indexX)*cS)),-(-cSHy + ((indexY)*cS)),0.0,0.0);
+							gVertsMapNum.push((-cSH + ((indexX)*cS)),-(-cSHy - cS + ((indexY)*cS)),0.0,0.0);
+						}else if(cell=="."){
+							gNodes[indexX][indexY].disponivel = true;
+						}
+					});
+				});
+			}
+
+			class TestShader extends Shader{
+				
+				constructor(gl,aryColor){
+					var vertSrc = ShaderUtil.domShaderSrc("vertex_shader");
+					var	fragSrc = ShaderUtil.domShaderSrc("fragment_shader");
+					super(gl,vertSrc,fragSrc);
+
+					var uColor	= gl.getUniformLocation(this.program,"uColor");
+					gl.uniform3fv(uColor, aryColor);
+
+					gl.useProgram(null);
+				}
+			}
+
+			function aoClick(event, points, canvas){
+
+				var xClick = event.clientX;
+				var yClick = event.clientY;
+
+				var meioX = canvas.width/2;
+				var meioY = canvas.height/2;
+
+				var rect = event.target.getBoundingClientRect();
+
+				xClick = ((xClick - rect.left) - meioX)/meioX;
+				yClick = (meioY - (yClick - rect.top))/meioY;
+
+
+				var x1;
+				var x2;
+				var auxX = -0.9;
+				var auxI;
+
+				for(let i=1 ; i <= gWidthGrid ; i++){
+					if(auxX > xClick ){
+						x1 = auxX - gCellSize;
+						x2 = auxX;
+						auxI = i-2;
+						break;
+					}
+					auxX = auxX + gCellSize;
+				}
+				
+
+				var y1;
+				var y2;
+				var auxY = 0.9;
+				var auxJ;
+
+				for(let j=1 ; j <= gWidthGrid ; j++){
+					if(auxY < yClick ){
+						y1 = auxY + gCellSize;
+						y2 = auxY;
+						auxJ=j-2;
+						break;
+					}
+					auxY = auxY - gCellSize;
+				}
+
+
+				
+				if(gCounterGO==0){
+
+					gNodeStart = [auxI,auxJ];
+					
+					gVertsGOUsable = new Float32Array([ x1,y1,0.0,1.0,
+														x1,y2,0.0,1.0,
+														x2,y1,0.0,1.0,
+														x1,y2,0.0,1.0,
+														x2,y1,0.0,1.0,
+														x2,y2,0.0,1.0]);
+
+					gCounterGO++;
+				
+				} else if(gCounterGO<2){
+					
+					gNodeGoal = [auxI,auxJ];
+
+					var aux = gVertsGOUsable;
+					var aux2 = new Float32Array([ x1,y1,0.0,4.0,
+												  x1,y2,0.0,4.0,
+												  x2,y1,0.0,4.0,
+												  x1,y2,0.0,4.0,
+												  x2,y1,0.0,4.0,
+												  x2,y2,0.0,4.0]);
+
+					gVertsGOUsable = new Float32Array(aux.length + aux2.length);
+					gVertsGOUsable.set(aux);
+					gVertsGOUsable.set(aux2,aux.length);
+					gCounterGO++;
+
+				}
+
+
+				if(gAuxGO===false){
+					gAuxGO=true;
+				}
+
+				
+			}
+
+			function makeArray(w, h) {
+    			var arr = [];
+    			for(let i = 0; i < h; i++) {
+        			arr[i] = [];
+       				for(let j = 0; j < w; j++) {
+            			arr[i][j] = new space(false,false,false,false,Infinity,i,j);
+        			}
+    			}
+    			return arr;
+			}			
+
+			function pintaPath(cS,cSH,cSHy){
+
+				gPathVerts = [];
+				gNodes.forEach(function(linha, indexY){
+					linha.forEach(function(cell, indexX){
+						if(cell.visitado==true && cell.objetivo==false){
+
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,2.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,2.0);
+							
+						}else if(cell.listado==true && cell.objetivo==false){
+
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,6.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,6.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,6.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,6.0);
+							gPathVerts.push((-cSHy + ((indexY)*cS)),-(-cSH - cS + ((indexX)*cS)),0.0,6.0);
+							gPathVerts.push((-cSHy - cS + ((indexY)*cS)),-(-cSH + ((indexX)*cS)),0.0,6.0);
+						
+						}
+					});
+				});
+				gAuxPath = true;
+			}
+
+			function space(v,d,o,l,h){
+				this.visitado=v;
+				this.disponivel=d;
+				this.objetivo=o;
+				this.listado=l;
+				this.heuristica=h;
+			}
+
+			function position(x,y,h,v){
+				this.x = x;
+				this.y = y;
+				this.heuristica = h;
+				this.visited=v;
+			}
+
+			function bfs(){
+				var i = gNodeStart[0];
+				var j = gNodeStart[1];
+				var iGoal = gNodeGoal[0];
+				var jGoal = gNodeGoal[1];
+				gNodes[iGoal][jGoal].objetivo = true;
+				var running = true;
+				console.log(gNodes);
+
+				var queue = [];
+				queue.push(new position(i,j,Infinity));
+				var queue_pos=0;
+				var findError=0;
+
+				while(running){
+					
+					if(gNodes[queue[queue_pos].x][queue[queue_pos].y].objetivo==true || gNodes[queue[queue_pos].x+1][queue[queue_pos].y].objetivo==true || gNodes[queue[queue_pos].x-1][queue[queue_pos].y].objetivo==true || gNodes[queue[queue_pos].x][queue[queue_pos].y+1].objetivo==true || gNodes[queue[queue_pos].x][queue[queue_pos].y-1].objetivo==true){
+						running = false;
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+						console.log("Objetivo encontrado!");
+					
+					}else if(gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado==false){
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+					
+
+						if(gNodes[queue[queue_pos].x+1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x+1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x+1)<=(gWidthGrid-2)){
+							queue.push(new position(queue[queue_pos].x+1,queue[queue_pos].y));
+							gNodes[queue[queue_pos].x+1][queue[queue_pos].y].listado=true;
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y+1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y+1].disponivel==true && (queue[queue_pos].y+1)<=(gHeightGrid-2)){
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y+1));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y+1].listado=true;
+						}
+
+						if(gNodes[queue[queue_pos].x-1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x-1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x-1)>=(1)){
+							queue.push(new position(queue[queue_pos].x-1,queue[queue_pos].y));
+							gNodes[queue[queue_pos].x-1][queue[queue_pos].y].listado=true;
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y-1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y-1].disponivel==true && (queue[queue_pos].y-1)>=(1)){
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y-1));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y-1].listado=true;
+						}
+
+						
+				    }
+					
+					//pintaPath(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+				
+					queue_pos++;
+				}
+
+				gNodes[gNodeStart[0]][gNodeStart[1]].visitado = false;
+
+				pintaPath(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+			
+			}
+
+				
+			function aStar(){
+				var i = gNodeStart[0];
+				var j = gNodeStart[1];
+				var iGoal = gNodeGoal[0];
+				var jGoal = gNodeGoal[1];
+				gNodes[iGoal][jGoal].objetivo = true;
+				var running = true;
+
+				var queue=[];
+				queue.push(new position(i,j,99999999,false));
+				var queue_pos=0;
+				
+
+				while(running){
+
+					//alert(queue[queue_pos].x + "|" + queue[queue_pos].y);
+					queue_pos =  indexOfMin(queue);
+					console.log(queue);
+					console.log(queue_pos);
+					
+
+
+					if(gNodes[queue[queue_pos].x][queue[queue_pos].y].objetivo==true){
+						//checkar se é o fim
+
+						running = false;
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+						console.log("Objetivo encontrado!");
+
+					}else if(gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado==false){
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+						queue[queue_pos].visited=true;
+					
+						//encontrar os nodos desejaveis
+
+						if(gNodes[queue[queue_pos].x+1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x+1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x+1)<=(gWidthGrid-2) && gNodes[queue[queue_pos].x+1][queue[queue_pos].y].listado==false){
+							
+							gNodes[queue[queue_pos].x+1][queue[queue_pos].y].heuristica = Math.abs(queue[queue_pos].x+1 - iGoal) + Math.abs(queue[queue_pos].y - jGoal) + Math.abs(queue[queue_pos].x+1 - i) + Math.abs(queue[queue_pos].y - j);
+							queue.push(new position(queue[queue_pos].x+1,queue[queue_pos].y,gNodes[queue[queue_pos].x+1][queue[queue_pos].y].heuristica,false));
+							gNodes[queue[queue_pos].x+1][queue[queue_pos].y].listado=true;
+					
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y+1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y+1].disponivel==true && (queue[queue_pos].y+1)<=(gHeightGrid-2) && gNodes[queue[queue_pos].x][queue[queue_pos].y+1].listado==false){
+							
+							gNodes[queue[queue_pos].x][queue[queue_pos].y+1].heuristica = Math.abs(queue[queue_pos].x - iGoal) + Math.abs(queue[queue_pos].y+1 - jGoal) + Math.abs(queue[queue_pos].x - i) + Math.abs(queue[queue_pos].y+1 - j);
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y+1,gNodes[queue[queue_pos].x][queue[queue_pos].y+1].heuristica,false));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y+1].listado=true;
+							
+						}
+
+						if(gNodes[queue[queue_pos].x-1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x-1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x-1)>=(1) && gNodes[queue[queue_pos].x-1][queue[queue_pos].y].listado==false){
+							
+							gNodes[queue[queue_pos].x-1][queue[queue_pos].y].heuristica = Math.abs(queue[queue_pos].x-1 - iGoal) + Math.abs(queue[queue_pos].y - jGoal) + Math.abs(queue[queue_pos].x-1 - i) + Math.abs(queue[queue_pos].y - j);
+							queue.push(new position(queue[queue_pos].x-1,queue[queue_pos].y,gNodes[queue[queue_pos].x-1][queue[queue_pos].y].heuristica,false));
+							gNodes[queue[queue_pos].x-1][queue[queue_pos].y].listado=true;
+							
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y-1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y-1].disponivel==true && (queue[queue_pos].y-1)>=(1) && gNodes[queue[queue_pos].x][queue[queue_pos].y-1].listado==false){
+							
+							gNodes[queue[queue_pos].x][queue[queue_pos].y-1].heuristica = Math.abs(queue[queue_pos].x - iGoal) + Math.abs(queue[queue_pos].y-1 - jGoal) + Math.abs(queue[queue_pos].x - i) + Math.abs(queue[queue_pos].y-1 - j);
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y-1,gNodes[queue[queue_pos].x][queue[queue_pos].y-1].heuristica,false));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y-1].listado=true;
+							
+						}
+
+					}else{
+						console.log("Erro de pesquisa!");
+						console.log(queue);
+						running=false;
+					}
+
+
+
+				}
+
+				gNodes[gNodeStart[0]][gNodeStart[1]].visitado = false;
+
+				pintaPath(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+			}
+
+			function dijkstra(){
+				var i = gNodeStart[0];
+				var j = gNodeStart[1];
+				var iGoal = gNodeGoal[0];
+				var jGoal = gNodeGoal[1];
+				gNodes[iGoal][jGoal].objetivo = true;
+				var running = true;
+
+				var queue=[];
+				queue.push(new position(i,j,99999999,false));
+				var queue_pos=0;
+				
+
+				while(running){
+
+					//alert(queue[queue_pos].x + "|" + queue[queue_pos].y);
+					queue_pos =  indexOfMin(queue);
+					console.log(queue);
+					console.log(queue_pos);
+					
+
+
+					if(gNodes[queue[queue_pos].x][queue[queue_pos].y].objetivo==true){
+						//checkar se é o fim
+
+						running = false;
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+						console.log("Objetivo encontrado!");
+
+					}else if(gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado==false){
+						gNodes[queue[queue_pos].x][queue[queue_pos].y].visitado=true;
+						queue[queue_pos].visited=true;
+					
+						//encontrar os nodos desejaveis
+
+						if(gNodes[queue[queue_pos].x+1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x+1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x+1)<=(gWidthGrid-2) && gNodes[queue[queue_pos].x+1][queue[queue_pos].y].listado==false){
+							
+							gNodes[queue[queue_pos].x+1][queue[queue_pos].y].heuristica = Math.abs(queue[queue_pos].x+1 - i) + Math.abs(queue[queue_pos].y - j);
+							queue.push(new position(queue[queue_pos].x+1,queue[queue_pos].y,gNodes[queue[queue_pos].x+1][queue[queue_pos].y].heuristica,false));
+							gNodes[queue[queue_pos].x+1][queue[queue_pos].y].listado=true;
+					
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y+1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y+1].disponivel==true && (queue[queue_pos].y+1)<=(gHeightGrid-2) && gNodes[queue[queue_pos].x][queue[queue_pos].y+1].listado==false){
+							
+							gNodes[queue[queue_pos].x][queue[queue_pos].y+1].heuristica = Math.abs(queue[queue_pos].x - i) + Math.abs(queue[queue_pos].y+1 - j);
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y+1,gNodes[queue[queue_pos].x][queue[queue_pos].y+1].heuristica,false));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y+1].listado=true;
+							
+						}
+
+						if(gNodes[queue[queue_pos].x-1][queue[queue_pos].y].visitado==false && gNodes[queue[queue_pos].x-1][queue[queue_pos].y].disponivel==true && (queue[queue_pos].x-1)>=(1) && gNodes[queue[queue_pos].x-1][queue[queue_pos].y].listado==false){
+							
+							gNodes[queue[queue_pos].x-1][queue[queue_pos].y].heuristica = Math.abs(queue[queue_pos].x-1 - i) + Math.abs(queue[queue_pos].y - j);
+							queue.push(new position(queue[queue_pos].x-1,queue[queue_pos].y,gNodes[queue[queue_pos].x-1][queue[queue_pos].y].heuristica,false));
+							gNodes[queue[queue_pos].x-1][queue[queue_pos].y].listado=true;
+							
+						}
+
+						if(gNodes[queue[queue_pos].x][queue[queue_pos].y-1].visitado==false && gNodes[queue[queue_pos].x][queue[queue_pos].y-1].disponivel==true && (queue[queue_pos].y-1)>=(1) && gNodes[queue[queue_pos].x][queue[queue_pos].y-1].listado==false){
+							
+							gNodes[queue[queue_pos].x][queue[queue_pos].y-1].heuristica = Math.abs(queue[queue_pos].x - i) + Math.abs(queue[queue_pos].y-1 - j);
+							queue.push(new position(queue[queue_pos].x,queue[queue_pos].y-1,gNodes[queue[queue_pos].x][queue[queue_pos].y-1].heuristica,false));
+							gNodes[queue[queue_pos].x][queue[queue_pos].y-1].listado=true;
+							
+						}
+
+					}else{
+						console.log("Erro de pesquisa!");
+						console.log(queue);
+						running=false;
+					}
+
+
+
+				}
+
+				gNodes[gNodeStart[0]][gNodeStart[1]].visitado = false;
+
+				pintaPath(gCellSize,0.9 - gCellSize,0.9 - gCellSize);
+			}
+
+
+			function escolherAlgoritmo(){
+				if (document.getElementById('e1').checked){
+  					aStar();
+				}else if(document.getElementById('e2').checked){
+					bfs();
+				}else if(document.getElementById('e3').checked){
+					dijkstra();
+				}else{
+					alert("Por favor, selecione um algoritmo!");
+				}
+			}
+
+			function indexOfMin(arr){
+    			
+    			if (arr.length === 0) {
+       	 			return -1;
+    			}
+
+    			var min = arr[0].heuristica;
+    			var minIndex = 0;
+
+    			for (var i = 1; i < arr.length; i++) {
+        			if (arr[i].heuristica < min && arr[i].visited == false) {
+           		 		minIndex = i;
+            			min = arr[i].heuristica;
+        			}
+    			}
+
+    			return minIndex;
+			}
+	
+	</script>
+</head>
+
+<body style="background-color: #ffffff;">
+
+	<div id='contents'>
+		<div id='canvasContainer' style="text-align: center; padding:6px 6px;">
+			<canvas id='glcanvas' style="border:1px solid #000000;" width='1300' height='500'>
+				Your browser does not support the HTML5 canvas element.
+			</canvas>
+		</div>
+	</div>
+</body>
+
+</html>
