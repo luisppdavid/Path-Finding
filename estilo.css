@@ -1,0 +1,42 @@
+body{
+	margin: 0;
+	font-family: "Lucida Console", Courier, monospace;
+	font-weight: 500;
+}
+
+.container {
+	width: 80%;
+	margin: 0 auto;
+}
+
+header {
+  background: #40c575;
+}
+
+header::after {
+  content: '';
+  display: table;
+  clear: both;
+}
+
+.logo {
+  float: left;
+  padding: 10px;
+}
+
+nav {
+  float: right;
+}
+
+nav ul {
+  margin: 0;
+  padding: 0;
+}
+
+nav li {
+  display: inline-block;
+  margin-left: 20px;
+  margin-right: 20px;
+  padding-top: 10px;
+  position: center;
+}
